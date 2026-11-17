@@ -10,4 +10,28 @@ def pregunta_11():
         {"a": 122, "b": 49, "c": 91, ...}
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+    import pandas as pd
+    
+    ruta = Path(__file__).resolve().parents[1] / "data" / "data.csv.gz"
+        
+    df = pd.read_csv(
+        ruta,
+        sep="\t",
+        header=None,
+        names=["letter", "value", "date", "codes", "metrics"],
+        compression="gzip",
+    )
+
+    resultado = (df.assign(codes=df['codes'].str.split(','))
+                 .explode('codes')
+                 .groupby('codes')['value']
+                 .sum()
+                 .sort_index()
+                 .to_dict())
+
+    print(resultado)    
+
+    return resultado
+
+pregunta_11()

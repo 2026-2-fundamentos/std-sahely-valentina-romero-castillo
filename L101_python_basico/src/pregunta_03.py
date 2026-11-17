@@ -9,4 +9,20 @@ def pregunta_03():
         [("A", 53), ("B", 36), ("C", 27), ...]
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+    import pandas as pd
+    
+    ruta = Path(__file__).resolve().parents[1] / "data" / "data.csv.gz"
+        
+    df = pd.read_csv(
+        ruta,
+        sep="\t",
+        header=None,
+        names=["letter", "value", "date", "codes", "metrics"],
+        compression="gzip",
+    )
+
+    resultado = df.groupby("letter")["value"].sum().reset_index(name="suma").sort_values("letter").apply(tuple, axis=1).tolist()
+    return resultado
+
+pregunta_03()

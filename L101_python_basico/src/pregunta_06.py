@@ -12,5 +12,38 @@ def pregunta_06():
 
         [("aaa", 1, 9), ("bbb", 1, 9), ...]
     """
+    from pathlib import Path
+    import pandas as pd
+    
+    ruta = Path(__file__).resolve().parents[1] / "data" / "data.csv.gz"
+        
+    df = pd.read_csv(
+        ruta,
+        sep="\t",
+        header=None,
+        names=["letter", "value", "date", "codes", "metrics"],
+        compression="gzip",
+    )
 
-    raise NotImplementedError
+    metricas = (
+        df["metrics"]
+        .str.split(",", expand=True)
+        .stack()
+        .str.split(":", expand=True)
+    )
+    metricas[1] = metricas[1].astype(int)
+
+    resultado = (
+        metricas.groupby(0)[1]
+        .agg(min="min", max="max")
+        .reset_index()
+        .sort_values(0)
+        .apply(tuple, axis=1)
+        .tolist()
+    )
+
+    print(resultado)
+
+    return resultado
+
+pregunta_06()
