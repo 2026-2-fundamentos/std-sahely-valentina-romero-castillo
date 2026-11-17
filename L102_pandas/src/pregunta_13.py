@@ -15,4 +15,20 @@ def pregunta_13():
         ...
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+    import pandas as pd
+
+    ruta = Path(__file__).resolve().parents[1] / "data" / "tbl0.tsv"
+    
+    df = pd.read_csv(ruta, sep="\t")
+
+    ruta2 = Path(__file__).resolve().parents[1] / "data" / "tbl2.tsv"
+
+    df2 = pd.read_csv(ruta2, sep="\t")
+
+    resultado = df.merge(df2, on="c0").groupby("c1")["c5b"].sum().sort_index()
+    print(resultado)
+
+    return resultado
+
+pregunta_13()

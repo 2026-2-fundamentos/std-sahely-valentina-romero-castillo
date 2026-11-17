@@ -8,4 +8,16 @@ def pregunta_02():
         4
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+    import pandas as pd
+
+    ruta = Path(__file__).resolve().parents[1] / "data" / "tbl0.tsv"
+    
+    df = pd.read_csv(ruta, sep="\t")
+
+    resultado = df.shape[1]
+    print(resultado)
+
+    return resultado
+
+pregunta_02()

@@ -15,4 +15,16 @@ def pregunta_12():
         ...
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+    import pandas as pd
+
+    ruta = Path(__file__).resolve().parents[1] / "data" / "tbl2.tsv"
+    
+    df = pd.read_csv(ruta, sep="\t")
+
+    resultado = df.groupby("c0")[["c5a", "c5b"]].apply(lambda x: ",".join(sorted(f"{a}:{b}" for a, b in zip(x["c5a"], x["c5b"])))).reset_index(name="c5")
+    print(resultado)
+
+    return resultado
+
+pregunta_12()
