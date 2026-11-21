@@ -48,4 +48,125 @@ def main():
         }
     """
 
-    raise NotImplementedError
+    # Librerías necesarias
+
+    import json
+    import re
+    from pathlib import Path
+    import pandas as pd
+
+    # Definición de rutas
+
+    activity_dir = Path(__file__).resolve().parents[1]
+    data_path = activity_dir / "data" / "ventas.csv.gz"
+    submission_dir = activity_dir / "submission"
+
+    # Lectura del archivo CSV
+    df = pd.read_csv(data_path)
+
+    # Función para normalizar los nombres de las columnas
+
+    def normalize_column(column):
+        normalized = str(column).lower().strip()
+        normalized = normalized.lstrip("\ufeff")
+        return re.sub(r"\s+", "_", normalized)
+
+    df.columns = [normalize_column(column) for column in df.columns]
+
+    required_columns = [
+        "supplier_id",
+        "supplier",
+        "country",
+        "city",
+        "purchase_date",
+        "amount",
+        "discount",
+        "weight",
+        "units",
+        "unit_price",
+        "contact_email",
+    ]
+
+    # Validación de datos
+
+    missing_required_columns = [
+        column for column in required_columns if column not in df.columns
+    ]
+
+    # Validación de columnas inesperadas
+    
+    unexpected_columns = sorted(
+        column for column in df.columns if column not in required_columns
+    )
+
+    duplicate_row_count = int(df.duplicated().sum())
+
+    if "supplier_id" in df.columns:
+        supplier_id_counts = df["supplier_id"].value_counts(dropna=False)
+        duplicate_supplier_id_row_count = int(
+            supplier_id_counts[supplier_id_counts > 1].sum()
+        )
+    else:
+        duplicate_supplier_id_row_count = 0
+
+    missing_value_count_by_column = {}
+    for column in df.columns:
+        missing_values = df[column].isna()
+        if df[column].dtype == "object":
+            missing_values |= df[column].astype(str).str.strip().isin(
+                ["", "N/A"]
+            )
+        missing_value_count_by_column[column] = int(missing_values.sum())
+
+    if "contact_email" in df.columns:
+        email_pattern = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+        email_values = df["contact_email"].dropna()
+        invalid_email_count = int(
+            (~email_values.astype(str).str.strip().str.match(email_pattern)).sum()
+        )
+    else:
+        invalid_email_count = 0
+
+    if "units" in df.columns:
+        unit_values = df["units"].dropna()
+        numeric_units = pd.to_numeric(unit_values, errors="coerce")
+        invalid_unit_count = int(
+            (
+                numeric_units.notna()
+                & (
+                    (numeric_units <= 0)
+                    | (numeric_units % 1 != 0)
+                )
+            ).sum()
+        )
+    else:
+        invalid_unit_count = 0
+
+    if "country" in df.columns:
+        country_values = sorted(
+            df["country"].dropna().astype(str).unique(),
+            key=lambda value: value,
+        )
+    else:
+        country_values = []
+
+    report = {
+        "row_count": int(len(df)),
+        "column_count": int(len(df.columns)),
+        "missing_required_columns": missing_required_columns,
+        "unexpected_columns": unexpected_columns,
+        "duplicate_row_count": duplicate_row_count,
+        "duplicate_supplier_id_row_count": duplicate_supplier_id_row_count,
+        "missing_value_count_by_column": missing_value_count_by_column,
+        "invalid_email_count": invalid_email_count,
+        "invalid_unit_count": invalid_unit_count,
+        "country_values": country_values,
+    }
+
+    report_path = submission_dir / "data_quality_report.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=4),
+        encoding="utf-8",
+    )
+
+    return report

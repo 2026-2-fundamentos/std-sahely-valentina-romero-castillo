@@ -80,4 +80,134 @@ def pregunta_01():
         }
     """
 
-    raise NotImplementedError
+    import json
+    from pathlib import Path
+
+    import pandas as pd
+
+    activity_dir = Path(__file__).resolve().parents[1]
+    data_path = activity_dir / "data" / "insurance.csv.gz"
+    submission_dir = activity_dir / "submission"
+    submission_dir.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_csv(data_path)
+    k = 5
+
+    df["age_group"] = pd.cut(
+        df["age"],
+        bins=[18, 30, 40, 50, 65],
+        right=False,
+        labels=["18-29", "30-39", "40-49", "50-64"],
+    ).astype("string")
+
+    df["bmi_group"] = pd.cut(
+        df["bmi"],
+        bins=[-float("inf"), 18.5, 25, 30, float("inf")],
+        right=False,
+        labels=["bajo peso", "normal", "sobrepeso", "obesidad"],
+    ).astype("string")
+
+    df["children_group"] = pd.cut(
+        df["children"],
+        bins=[-1, 0, 2, float("inf")],
+        right=True,
+        labels=["0", "1-2", "3+"],
+    ).astype("string")
+
+    original_quasi = ["age", "sex", "bmi", "children", "region"]
+    original_sizes = df.groupby(original_quasi, dropna=False).size()
+    original_k = int(original_sizes.min())
+    original_unique_records = int((original_sizes == 1).sum())
+
+    def analyze_scheme(quasi_identifiers):
+        class_sizes = df.groupby(quasi_identifiers, dropna=False).size()
+        published_mask = df.set_index(quasi_identifiers).index.map(
+            lambda values: class_sizes.loc[values] >= k
+        )
+
+        published = df.loc[published_mask].copy()
+        published_sizes = published.groupby(
+            quasi_identifiers,
+            dropna=False,
+        ).size()
+
+        smoker_diversity = (
+            published.groupby(quasi_identifiers, dropna=False)["smoker"]
+            .nunique()
+        )
+        classes_without_diversity = int(
+            (smoker_diversity == 1).sum()
+        )
+        records_without_diversity = int(
+            published_sizes.loc[smoker_diversity.index[smoker_diversity == 1]].sum()
+        )
+
+        return {
+            "quasi_identifiers": quasi_identifiers,
+            "equivalence_classes": int(len(class_sizes)),
+            "k_before_suppression": int(class_sizes.min()),
+            "suppressed_records": int(len(df) - len(published)),
+            "published_records": int(len(published)),
+            "published_classes": int(len(published_sizes)),
+            "classes_without_smoker_diversity": classes_without_diversity,
+            "records_without_smoker_diversity": records_without_diversity,
+        }, published
+
+    with_children = [
+        "age_group",
+        "sex",
+        "bmi_group",
+        "children_group",
+        "region",
+    ]
+    without_children = ["age_group", "sex", "bmi_group", "region"]
+
+    with_children_report, with_children_published = analyze_scheme(with_children)
+    without_children_report, without_children_published = analyze_scheme(without_children)
+
+    selected_name = (
+        "without_children"
+        if without_children_report["suppressed_records"]
+        <= with_children_report["suppressed_records"]
+        else "with_children"
+    )
+    selected_published = (
+        without_children_published
+        if selected_name == "without_children"
+        else with_children_published
+    )
+    selected_quasi = (
+        without_children
+        if selected_name == "without_children"
+        else with_children
+    )
+
+    report = {
+        "original_k": original_k,
+        "original_unique_records": original_unique_records,
+        "schemes": {
+            "with_children": with_children_report,
+            "without_children": without_children_report,
+        },
+        "selected_scheme": selected_name,
+        "mean_charges_original": float(df["charges"].mean()),
+        "mean_charges_published": float(selected_published["charges"].mean()),
+        "smoker_rate_original": float((df["smoker"] == "yes").mean()),
+        "smoker_rate_published": float(
+            (selected_published["smoker"] == "yes").mean()
+        ),
+    }
+
+    submission_columns = selected_quasi + ["smoker", "charges"]
+    selected_published = selected_published[submission_columns].copy()
+
+    (submission_dir / "privacy_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=4),
+        encoding="utf-8",
+    )
+    selected_published.to_csv(
+        submission_dir / "insurance_published.csv",
+        index=False,
+    )
+
+    return report
