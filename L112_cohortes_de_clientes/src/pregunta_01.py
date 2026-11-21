@@ -44,4 +44,113 @@ def build_cohort_analysis() -> pd.DataFrame:
         ...
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+
+    activity_dir = Path(__file__).resolve().parents[1]
+    data_path = activity_dir / "data" / "sales.csv.gz"
+    submission_dir = activity_dir / "submission"
+    submission_dir.mkdir(parents=True, exist_ok=True)
+
+    sales = pd.read_csv(data_path)
+
+    sales["order_month"] = pd.to_datetime(
+        sales["OrderDate"],
+        errors="coerce",
+    ).dt.to_period("M")
+
+    sales["cohort_month"] = (
+        sales.groupby("CustomerID")["order_month"].transform("min")
+    )
+
+    cohort_month_number = sales["cohort_month"].dt.year * 12 + sales[
+        "cohort_month"
+    ].dt.month - 1
+    order_month_number = sales["order_month"].dt.year * 12 + sales[
+        "order_month"
+    ].dt.month - 1
+    sales["period_index"] = order_month_number - cohort_month_number
+
+    active = (
+        sales.groupby(["cohort_month", "period_index"], as_index=False)
+        .agg(active_customers=("CustomerID", "nunique"))
+    )
+
+    cohort_sizes = (
+        active[active["period_index"] == 0]
+        .set_index("cohort_month")["active_customers"]
+    )
+    active["cohort_size"] = active["cohort_month"].map(cohort_sizes)
+    active["retention_rate"] = (
+        active["active_customers"] / active["cohort_size"]
+    )
+
+    active = active[
+        [
+            "cohort_month",
+            "period_index",
+            "active_customers",
+            "cohort_size",
+            "retention_rate",
+        ]
+    ].sort_values(["cohort_month", "period_index"]).reset_index(drop=True)
+
+    active["cohort_month"] = active["cohort_month"].astype(str)
+    active["period_index"] = active["period_index"].astype("int64")
+
+    active.to_csv(
+        submission_dir / "cohort_retention.csv",
+        index=False,
+    )
+
+    heatmap = active.pivot(
+        index="cohort_month",
+        columns="period_index",
+        values="retention_rate",
+    )
+
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import PercentFormatter
+
+    fig, axis = plt.subplots(figsize=(10, 6))
+    image = axis.imshow(
+        heatmap.to_numpy(dtype=float),
+        aspect="auto",
+        cmap="Blues",
+        vmin=0,
+        vmax=1,
+    )
+
+    axis.set_xticks(range(len(heatmap.columns)))
+    axis.set_xticklabels(heatmap.columns)
+    axis.set_yticks(range(len(heatmap.index)))
+    axis.set_yticklabels(heatmap.index)
+    axis.set_xlabel("Period index")
+    axis.set_ylabel("Cohort month")
+
+    for row_index in range(len(heatmap.index)):
+        for column_index in range(len(heatmap.columns)):
+            value = heatmap.iloc[row_index, column_index]
+            if pd.notna(value):
+                axis.text(
+                    column_index,
+                    row_index,
+                    f"{value:.0%}",
+                    ha="center",
+                    va="center",
+                )
+
+    axis.set_title("Cohort retention")
+    fig.colorbar(
+        image,
+        ax=axis,
+        label="Retention rate",
+        format=PercentFormatter(1.0),
+    )
+    fig.tight_layout()
+    fig.savefig(
+        submission_dir / "cohort_retention_heatmap.png",
+        dpi=150,
+    )
+    plt.close(fig)
+
+    return active

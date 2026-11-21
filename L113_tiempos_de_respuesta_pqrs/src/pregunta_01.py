@@ -61,4 +61,136 @@ def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         ...
     """
 
-    raise NotImplementedError
+    from pathlib import Path
+
+    activity_dir = Path(__file__).resolve().parents[1]
+    data_dir = activity_dir / "data"
+    submission_dir = activity_dir / "submission"
+    submission_dir.mkdir(parents=True, exist_ok=True)
+
+    letter = pd.read_csv(data_dir / "historical_requests_letter.csv.gz")
+    web = pd.read_csv(data_dir / "historical_requests_web.csv.gz")
+
+    letter = letter.drop_duplicates().copy()
+    web = web.drop_duplicates().copy()
+
+    letter["channel"] = "letter"
+    web["channel"] = "web"
+    requests = pd.concat([letter, web], ignore_index=True)
+
+    requests["in_date"] = pd.to_datetime(
+        requests["in_date"],
+        format="%Y-%m-%d",
+        errors="coerce",
+    )
+    requests["out_date"] = pd.to_datetime(
+        requests["out_date"],
+        format="%Y-%m-%d",
+        errors="coerce",
+    )
+    requests["year"] = requests["in_date"].dt.year
+
+    answered_mask = requests["out_date"].notna()
+
+    requests["calendar_days"] = pd.NA
+    requests.loc[answered_mask, "calendar_days"] = (
+        requests.loc[answered_mask, "out_date"]
+        - requests.loc[answered_mask, "in_date"]
+    ).dt.days
+
+    def business_days(row):
+        if pd.isna(row["out_date"]):
+            return pd.NA
+        return pd.Timestamp(row["out_date"]).toordinal()
+
+    requests["business_days"] = pd.NA
+    requests.loc[answered_mask, "business_days"] = (
+        pd.Series(
+            [
+                pd.bdate_range(
+                    start=in_date + pd.Timedelta(days=1),
+                    end=out_date,
+                    freq="C",
+                ).size
+                for in_date, out_date in zip(
+                    requests.loc[answered_mask, "in_date"],
+                    requests.loc[answered_mask, "out_date"],
+                )
+            ],
+            index=requests.loc[answered_mask].index,
+        )
+    )
+
+    requests["on_time"] = (
+        answered_mask
+        & (requests["business_days"].astype("Float64") <= 15)
+    )
+
+    channel_summary = (
+        requests.groupby("channel", as_index=False)
+        .agg(
+            requests=("record_id", "size"),
+            answered=("out_date", lambda values: values.notna().sum()),
+            pending=("out_date", lambda values: values.isna().sum()),
+            median_business_days=("business_days", "median"),
+            on_time_rate=("on_time", "mean"),
+        )
+        .sort_values("channel")
+        .reset_index(drop=True)
+    )
+
+    yearly_summary = (
+        requests.groupby(["year", "channel"], as_index=False)
+        .agg(
+            requests=("record_id", "size"),
+            pending=("out_date", lambda values: values.isna().sum()),
+            on_time_rate=("on_time", "mean"),
+        )
+        .sort_values(["year", "channel"])
+        .reset_index(drop=True)
+    )
+
+    day_order = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+    entry_day_summary = (
+        requests.groupby("day_name", as_index=False)
+        .agg(
+            requests=("record_id", "size"),
+            median_calendar_days=("calendar_days", "median"),
+            median_business_days=("business_days", "median"),
+        )
+    )
+    day_order_map = {
+        day_name: position
+        for position, day_name in enumerate(day_order)
+    }
+    entry_day_summary["_day_order"] = entry_day_summary["day_name"].map(
+        day_order_map
+    )
+    entry_day_summary = (
+        entry_day_summary.sort_values("_day_order")
+        .drop(columns="_day_order")
+        .reset_index(drop=True)
+    )
+
+    channel_summary.to_csv(
+        submission_dir / "channel_summary.csv",
+        index=False,
+    )
+    yearly_summary.to_csv(
+        submission_dir / "yearly_summary.csv",
+        index=False,
+    )
+    entry_day_summary.to_csv(
+        submission_dir / "entry_day_summary.csv",
+        index=False,
+    )
+
+    return channel_summary, yearly_summary, entry_day_summary
